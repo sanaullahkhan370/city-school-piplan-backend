@@ -1,0 +1,227 @@
+const crypto = require('crypto');
+const asyncHandler = require('express-async-handler');
+const FeeStructure = require('../models/feeStructure.model');
+const FeeInvoice = require('../models/feeInvoice.model');
+const FeePayment = require('../models/feePayment.model');
+const Student = require('../models/student.model');
+const ParentStudent = require('../models/parentStudent.model');
+const StudentEnrollment = require('../models/studentEnrollment.model');
+const UpcomingFee = require('../models/upcomingFee.model');
+
+const createStructure = asyncHandler(async (req, res) => {
+  const { academicSessionId, title, feeType, amount } = req.body;
+  if (!academicSessionId || !title || !feeType || amount === undefined) { res.status(400); throw new Error('Session, title, fee type and amount are required'); }
+  const data = await FeeStructure.create({ ...req.body, schoolId: req.user.schoolId, createdBy: req.user._id });
+  res.status(201).json({ success: true, message: 'Fee structure created', data });
+});
+
+const listStructures = asyncHandler(async (req, res) => {
+  const data = await FeeStructure.find({ schoolId: req.user.schoolId }).populate('academicSessionId', 'name').populate('classId', 'name').sort({ createdAt: -1 });
+  res.json({ success: true, data });
+});
+
+const createInvoice = asyncHandler(async (req, res) => {
+  const { studentId, academicSessionId, items, dueDate } = req.body;
+  if (!studentId || !academicSessionId || !Array.isArray(items) || !items.length || !dueDate) { res.status(400); throw new Error('Student, Session, items and due date are required'); }
+  const student = await Student.findOne({ _id: studentId, schoolId: req.user.schoolId });
+  if (!student) { res.status(404); throw new Error('Student not found'); }
+  const cleanItems = items.map((item) => ({ title: String(item.title || 'Fee'), feeType: String(item.feeType || 'other'), amount: Number(item.amount) })).filter((item) => item.amount >= 0);
+  if (!cleanItems.length) { res.status(400); throw new Error('At least one valid fee item is required'); }
+  const subtotal = cleanItems.reduce((sum, item) => sum + item.amount, 0);
+  const discount = Math.max(Number(req.body.discount) || 0, 0);
+  const fine = Math.max(Number(req.body.fine) || 0, 0);
+  const totalAmount = Math.max(subtotal - discount + fine, 0);
+  const invoiceNumber = `INV-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  const data = await FeeInvoice.create({ schoolId: req.user.schoolId, academicSessionId, studentId, invoiceNumber, items: cleanItems, subtotal, discount, fine, totalAmount, remainingAmount: totalAmount, dueDate, createdBy: req.user._id });
+  res.status(201).json({ success: true, message: 'Fee invoice generated', data });
+});
+
+const listInvoices = asyncHandler(async (req, res) => {
+  const query = { schoolId: req.user.schoolId };
+  if (req.query.studentId) query.studentId = req.query.studentId;
+  if (req.query.status) query.status = req.query.status;
+  const data = await FeeInvoice.find(query).populate('studentId', 'fullName admissionNumber').populate('academicSessionId', 'name').sort({ createdAt: -1 });
+  res.json({ success: true, data });
+});
+
+const recordPayment = asyncHandler(async (req, res) => {
+  const invoice = await FeeInvoice.findOne({ _id: req.params.invoiceId, schoolId: req.user.schoolId });
+  if (!invoice || invoice.status === 'cancelled') { res.status(404); throw new Error('Payable invoice not found'); }
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > invoice.remainingAmount) { res.status(400); throw new Error('Payment amount is invalid'); }
+  const method = req.body.method;
+  if (!['cash', 'bankDeposit'].includes(method)) { res.status(400); throw new Error('Payment method must be cash or bankDeposit'); }
+  const receiptNumber = `RCP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  const payment = await FeePayment.create({ schoolId: req.user.schoolId, invoiceId: invoice._id, studentId: invoice.studentId, receiptNumber, amount, method, reference: req.body.reference || '', recordedBy: req.user._id });
+  invoice.paidAmount += amount;
+  invoice.remainingAmount = Math.max(invoice.totalAmount - invoice.paidAmount, 0);
+  invoice.status = invoice.remainingAmount === 0 ? 'paid' : 'partiallyPaid';
+  await invoice.save();
+  res.status(201).json({ success: true, message: 'Payment recorded', data: { payment, invoice } });
+});
+
+const listPayments = asyncHandler(async (req, res) => {
+  const data = await FeePayment.find({ schoolId: req.user.schoolId }).populate('studentId', 'fullName admissionNumber').populate('invoiceId', 'invoiceNumber totalAmount').sort({ paidAt: -1 });
+  res.json({ success: true, data });
+});
+
+const createUpcomingFee = asyncHandler(async (req, res) => {
+  const { academicSessionId, title, feeType, amount, expectedDate, dueDate } = req.body;
+  if (!academicSessionId || !title?.trim() || !feeType || amount === undefined || !expectedDate || !dueDate) {
+    res.status(400);
+    throw new Error('Session, title, fee type, amount, expected date and due date are required');
+  }
+  if (new Date(dueDate) < new Date(expectedDate)) {
+    res.status(400);
+    throw new Error('Due date must be on or after expected date');
+  }
+  const data = await UpcomingFee.create({
+    schoolId: req.user.schoolId,
+    academicSessionId,
+    classId: req.body.classId || null,
+    studentId: req.body.studentId || null,
+    title: title.trim(),
+    feeType,
+    amount: Number(amount),
+    expectedDate,
+    dueDate,
+    description: req.body.description?.trim() || '',
+    createdBy: req.user._id,
+  });
+  res.status(201).json({ success: true, data });
+});
+
+const listUpcomingFees = asyncHandler(async (req, res) => {
+  const data = await UpcomingFee.find({ schoolId: req.user.schoolId, isActive: true })
+    .populate('academicSessionId', 'name')
+    .populate('classId', 'name')
+    .populate('studentId', 'fullName admissionNumber')
+    .sort({ expectedDate: 1 });
+  res.json({ success: true, data });
+});
+
+const getParentFeeStatus = asyncHandler(async (req, res) => {
+  const links = await ParentStudent.find({
+    schoolId: req.user.schoolId,
+    parentId: req.user._id,
+    isActive: true,
+    canPayFees: true,
+  }).populate('studentId', 'fullName admissionNumber profileImage status');
+
+  const children = [];
+  for (const link of links) {
+    if (!link.studentId) continue;
+    const invoices = await FeeInvoice.find({
+      schoolId: req.user.schoolId,
+      studentId: link.studentId._id,
+      status: { $ne: 'cancelled' },
+    })
+      .populate('academicSessionId', 'name')
+      .sort({ issueDate: -1, createdAt: -1 });
+    const enrollment = await StudentEnrollment.findOne({
+      schoolId: req.user.schoolId,
+      studentId: link.studentId._id,
+      isCurrent: true,
+      status: 'active',
+    });
+    const upcomingMatch = [
+      { studentId: link.studentId._id },
+      { studentId: null, classId: enrollment?.classId || null },
+      { studentId: null, classId: null },
+    ];
+    const upcomingFees = await UpcomingFee.find({
+      schoolId: req.user.schoolId,
+      status: 'planned',
+      isActive: true,
+      $or: upcomingMatch,
+    })
+      .populate('academicSessionId', 'name')
+      .populate('classId', 'name')
+      .sort({ expectedDate: 1 });
+
+    const invoiceData = [];
+    for (const invoice of invoices) {
+      const payments = await FeePayment.find({
+        schoolId: req.user.schoolId,
+        invoiceId: invoice._id,
+        studentId: link.studentId._id,
+      }).sort({ paidAt: -1 });
+      const isOverdue = invoice.remainingAmount > 0 &&
+        new Date(invoice.dueDate) < new Date();
+      invoiceData.push({
+        invoice,
+        displayStatus: isOverdue ? 'overdue' : invoice.status,
+        payments,
+      });
+    }
+
+    const summary = invoiceData.reduce(
+      (total, entry) => {
+        total.totalAmount += Number(entry.invoice.totalAmount || 0);
+        total.paidAmount += Number(entry.invoice.paidAmount || 0);
+        total.remainingAmount += Number(entry.invoice.remainingAmount || 0);
+        if (entry.displayStatus === 'overdue') total.overdueInvoices += 1;
+        return total;
+      },
+      { totalAmount: 0, paidAmount: 0, remainingAmount: 0, overdueInvoices: 0 }
+    );
+
+    summary.upcomingAmount = upcomingFees.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    summary.upcomingCount = upcomingFees.length;
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const followingMonthStart = new Date(now.getFullYear(), now.getMonth() + 2, 1);
+    const currentMonthInvoices = invoiceData.filter((entry) => {
+      const issueDate = new Date(entry.invoice.issueDate);
+      return issueDate >= currentMonthStart && issueDate < nextMonthStart;
+    });
+    summary.currentMonth = currentMonthInvoices.reduce(
+      (total, entry) => {
+        total.billed += Number(entry.invoice.totalAmount || 0);
+        total.paid += Number(entry.invoice.paidAmount || 0);
+        total.remaining += Number(entry.invoice.remainingAmount || 0);
+        return total;
+      },
+      { billed: 0, paid: 0, remaining: 0 }
+    );
+    const nextMonthFees = upcomingFees.filter((item) => {
+      const expectedDate = new Date(item.expectedDate);
+      return expectedDate >= nextMonthStart && expectedDate < followingMonthStart;
+    });
+    summary.nextMonth = {
+      amount: nextMonthFees.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      count: nextMonthFees.length,
+      month: nextMonthStart.toLocaleString('en', { month: 'long', year: 'numeric' }),
+    };
+    const duesMap = new Map();
+    for (const entry of invoiceData) {
+      const invoice = entry.invoice;
+      if (Number(invoice.remainingAmount || 0) <= 0) continue;
+      const ratio = Number(invoice.totalAmount || 0) > 0
+        ? Number(invoice.remainingAmount || 0) / Number(invoice.totalAmount)
+        : 0;
+      for (const item of invoice.items || []) {
+        const type = item.feeType || 'other';
+        duesMap.set(type, Number((Number(duesMap.get(type) || 0) + Number(item.amount || 0) * ratio).toFixed(2)));
+      }
+    }
+    summary.duesByType = Array.from(duesMap.entries())
+      .map(([feeType, amount]) => ({ feeType, amount }))
+      .sort((a, b) => b.amount - a.amount);
+    children.push({ student: link.studentId, summary, upcomingFees, invoices: invoiceData });
+  }
+  res.json({ success: true, data: children });
+});
+
+module.exports = {
+  createStructure,
+  listStructures,
+  createInvoice,
+  listInvoices,
+  recordPayment,
+  listPayments,
+  getParentFeeStatus,
+  createUpcomingFee,
+  listUpcomingFees,
+};

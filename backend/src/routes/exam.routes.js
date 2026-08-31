@@ -1,0 +1,18 @@
+const express = require('express');
+const controller = require('../controllers/exam.controller');
+const { protect } = require('../middleware/auth.middleware');
+const { authorize } = require('../middleware/role.middleware');
+const router = express.Router();
+router.use(protect);
+router.route('/').get(authorize('admin'), controller.listExams).post(authorize('admin'), controller.createExam);
+router.get('/parent/results', authorize('parent'), controller.getParentResults);
+router.patch('/:id/status', authorize('admin'), controller.updateExamStatus);
+router.route('/subjects').get(authorize('admin', 'teacher'), controller.listExamSubjects).post(authorize('admin'), controller.createExamSubject);
+router.get('/subjects/:examSubjectId/sheets', authorize('admin', 'teacher'), controller.listAnswerSheets);
+router.post('/subjects/:examSubjectId/sheets/allocate', authorize('admin', 'teacher'), controller.allocateAnswerSheet);
+router.post('/subjects/:examSubjectId/sheets/allocate-manual', authorize('admin', 'teacher'), controller.allocateAnswerSheetManually);
+router.get('/sheets/:sheetNumber', authorize('admin', 'teacher'), controller.getAnswerSheet);
+router.put('/sheets/:sheetNumber/marks', authorize('admin', 'teacher'), controller.submitAnswerSheetMarks);
+router.get('/subjects/:examSubjectId/marks', authorize('admin', 'teacher'), controller.getMarkSheet);
+router.put('/subjects/:examSubjectId/marks', authorize('admin', 'teacher'), controller.saveMarks);
+module.exports = router;

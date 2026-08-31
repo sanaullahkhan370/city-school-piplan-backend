@@ -1,0 +1,106 @@
+# ==============================
+# Flutter / Dart
+# ==============================
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+build/
+coverage/
+doc/api/
+
+.flutter-plugins
+.flutter-plugins-dependencies
+**/generated_plugin_registrant.dart
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+*.jks
+*.keystore
+
+# iOS / macOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+macos/Pods/
+macos/Flutter/ephemeral/
+
+# Windows / Linux generated files
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# ==============================
+# Node.js Backend
+# ==============================
+node_modules/
+backend/node_modules/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Secret environment files
+.env
+.env.*
+!.env.example
+
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Node build and cache
+dist/
+backend/dist/
+.cache/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+*.pid
+*.pid.lock
+
+# Temporary uploads
+uploads/temp/
+backend/uploads/temp/
+
+# ==============================
+# VS Code / Android Studio
+# ==============================
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# ==============================
+# Windows / macOS
+# ==============================
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ==============================
+# Temporary and archive files
+# ==============================
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.zip
+*.rar
+*.7z
+~$*
+
+# Local databases and tests
+*.sqlite
+*.sqlite3
+test-results/

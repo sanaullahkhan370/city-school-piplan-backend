@@ -1,0 +1,13 @@
+const express = require('express');
+const controller = require('../controllers/attendance.controller');
+const { protect } = require('../middleware/auth.middleware');
+const { authorize } = require('../middleware/role.middleware');
+const router = express.Router();
+router.use(protect);
+router.get('/sheet', authorize('teacher', 'admin'), controller.getSheet);
+router.post('/manual', authorize('teacher', 'admin'), controller.saveManual);
+router.post('/scan', authorize('teacher', 'admin'), controller.scanCard);
+router.get('/sessions', authorize('admin'), controller.listSessions);
+router.patch('/records/:id/correct', authorize('admin'), controller.adminCorrection);
+router.get('/parent', authorize('parent'), controller.getParentAttendance);
+module.exports = router;
